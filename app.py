@@ -288,7 +288,7 @@ if st.button("🚀 Рассчитать сделку"):
         else:
             qty = risk_amount / stop_distance
             position_usd_no_lev = qty * entry_price
-            position_usd_with_lev = position_usд_no_lev * leverage
+            position_usd_with_lev = position_usd_no_lev * leverage
             rr = tp_distance / stop_distance
 
             fees = position_usd_with_lev * taker_fee * 2
