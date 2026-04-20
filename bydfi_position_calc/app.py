@@ -28,7 +28,7 @@ settings = load_settings()
 
 # ---------- заголовок ----------
 
-st.title("🧮  Калькулятор объема позиции для трейдинга")
+st.title("🧮 Калькулятор объема позиции для трейдинга")
 st.markdown("Заполни параметры сделки, выбери риск и плечо — я посчитаю объем, количество монет и R:R.")
 
 # ---------- 1. Аналитика фьючерса: ATR и стоп 10% ATR ----------
@@ -42,7 +42,6 @@ if "rec_stop_distance" not in st.session_state:
     st.session_state["rec_stop_distance"] = None
 
 show_analysis = st.checkbox("Показать аналитику фьючерса и стоп 10% ATR", value=False)
-
 if show_analysis:
     try:
         # подключаем BYDFi
@@ -179,6 +178,7 @@ if show_analysis:
                 st.caption("Расстояние стопа 10% ATR сохранено и используется как подсказка в поле SL.")
     except Exception as e:
         st.error(f"Ошибка при запросе к BYDFi: {e}")
+
 # ---------- 2. Риск и депозит ----------
 
 st.subheader("1️⃣ Риск и депозит")
@@ -192,44 +192,7 @@ with col_r1:
     balance = st.number_input("💰 Депозит, USDT", value=default_balance, min_value=0.0, step=100.0)
 
 with col_r2:
-    risk_mode = st.radio("Режим выбора риска", ["Кнопки", "Вручную"])
-
-risk_percent = default_saved_risk
-
-if risk_mode == "Кнопки":
-    row1 = st.columns(7)
-    row2 = st.columns(7)
-
-    buttons_row1 = [
-        ("0.1%", 0.1),
-        ("0.2%", 0.2),
-        ("0.3%", 0.3),
-        ("0.4%", 0.4),
-        ("0.5%", 0.5),
-        ("0.6%", 0.6),
-        ("0.7%", 0.7),
-    ]
-
-    buttons_row2 = [
-        ("0.8%", 0.8),
-        ("0.9%", 0.9),
-        ("1%",   1.0),
-        ("1.5%", 1.5),
-        ("2%",   2.0),
-        ("2.5%", 2.5),
-        ("3%",   3.0),
-    ]
-
-    for (label, value), col in zip(buttons_row1, row1):
-        with col:
-            if st.button(label):
-                risk_percent = value
-
-    for (label, value), col in zip(buttons_row2, row2):
-        with col:
-            if st.button(label):
-                risk_percent = value
-else:
+    # убрали режим кнопок, оставляем только ручной ввод риска
     risk_percent = st.number_input(
         "⚠️ Риск на сделку, %",
         value=default_saved_risk,
@@ -337,9 +300,8 @@ if st.button("🚀 Рассчитать сделку"):
             profit_net = profit_gross - fees
             loss_net = loss_gross + fees
 
-            # ---------- новая логика вердикта по R:R ----------
-            rr_good = 2.0     # >= этого — норм
-            rr_warning = 1.0  # < этого — лучше не брать
+            rr_good = 2.0
+            rr_warning = 1.0
 
             if rr >= rr_good:
                 verdict = "✅ Параметры сделки в норме"
