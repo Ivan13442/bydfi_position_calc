@@ -60,7 +60,6 @@ if show_analysis:
         direct_map = {
             "BTCUSDT": "BTC/USDT:USDT",
             "ETHUSDT": "ETH/USDT:USDT",
-            # при желании добавишь сюда ещё тикеры
         }
 
         if user_raw in direct_map:
@@ -87,7 +86,7 @@ if show_analysis:
         if matched_symbol is None:
             st.error(f"Фьючерсный тикер не найден на BYDFi: **{user_raw}**.")
         else:
-            # сначала берём текущую цену
+            # текущая цена
             ticker = exchange.fetch_ticker(matched_symbol)
             last_price = ticker["last"]
 
@@ -109,7 +108,10 @@ if show_analysis:
                 st.stop()
 
             df_ohlc = pd.DataFrame(ohlcv, columns=["time", "open", "high", "low", "close", "volume"])
-st.write(f"DEBUG: получено {len(df_ohlc)} 4h свечей для ATR")
+
+            # DEBUG: сколько свечей реально получили
+            st.write(f"DEBUG: получено {len(df_ohlc)} 4h свечей для ATR")
+
             df_ohlc["prev_close"] = df_ohlc["close"].shift(1)
             df_ohlc["tr1"] = df_ohlc["high"] - df_ohlc["low"]
             df_ohlc["tr2"] = (df_ohlc["high"] - df_ohlc["prev_close"]).abs()
@@ -139,9 +141,8 @@ st.write(f"DEBUG: получено {len(df_ohlc)} 4h свечей для ATR")
 
                 st.write(f"Найденный фьючерсный символ на BYDFi: **{matched_symbol}**")
                 st.write(f"Текущая цена: **{last_price:.4f} USDT**")
-                st.write(f"ATR(14, {used_timeframe}): **{atr:.4f} USDT**")
+                st.write(f"ATR(14, {used_timeframe}, по 30×4h свечам): **{atr:.4f} USDT**")
 
-                # синяя рамка для максимального люфта
                 st.markdown(
                     f"""
                     <div style="
@@ -159,7 +160,6 @@ st.write(f"DEBUG: получено {len(df_ohlc)} 4h свечей для ATR")
                     unsafe_allow_html=True,
                 )
 
-                # жёлтая рамка с рекомендуемым стопом 10% ATR
                 st.markdown(
                     f"""
                     <div style="
@@ -183,7 +183,6 @@ st.write(f"DEBUG: получено {len(df_ohlc)} 4h свечей для ATR")
                 st.caption("Расстояние стопа 10% ATR сохранено и используется как подсказка в поле SL.")
     except Exception as e:
         st.error(f"Ошибка при запросе к BYDFi: {e}")
-
 # ---------- 2. Риск и депозит ----------
 
 st.subheader("1️⃣ Риск и депозит")
