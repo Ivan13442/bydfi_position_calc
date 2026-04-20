@@ -87,22 +87,20 @@ if show_analysis:
         if matched_symbol is None:
             st.error(f"Фьючерсный тикер не найден на BYDFi: **{user_raw}**.")
         else:
-            ticker = exchange.fetch_ticker(matched_symbol)
-            last_price = ticker["last"]
-
-            # пробуем сначала дневные свечи для ATR(14), если BYDFi даёт 500 - падаем на 4h
+            # --- НОВАЯ ЛОГИКА ВЫБОРА СВЕЧЕЙ ДЛЯ ATR ---
             ohlcv = None
-used_timeframe = "4h"
+            used_timeframe = "4h"
 
-try:
-    # берём 30 четырёхчасовиков ≈ 5 дней (6 свечей в день)
-    ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=30)
-except Exception as e_4h:
-    st.error(
-        f"Не удалось получить 4h свечи (OHLCV) по {matched_symbol} на BYDFi.\n\n"
-        f"Ошибка для 4h: {e_4h}"
-    )
-    ohlcv = None
+            try:
+                # берём 30 четырёхчасовиков ≈ 5 дней (6 свечей в день)
+                ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=30)
+            except Exception as e_4h:
+                st.error(
+                    f"Не удалось получить 4h свечи (OHLCV) по {matched_symbol} на BYDFi.\n\n"
+                    f"Ошибка для 4h: {e_4h}"
+                )
+                ohlcv = None
+
             if not ohlcv:
                 st.stop()
 
@@ -181,7 +179,6 @@ except Exception as e_4h:
                 st.caption("Расстояние стопа 10% ATR сохранено и используется как подсказка в поле SL.")
     except Exception as e:
         st.error(f"Ошибка при запросе к BYDFi: {e}")
-
 # ---------- 2. Риск и депозит ----------
 
 st.subheader("1️⃣ Риск и депозит")
