@@ -405,7 +405,9 @@ if st.button("🚀 Рассчитать сделку"):
                             Риск на сделку: <b>{risk_amount:.2f} USDT</b><br>
                             Кол-во монет: <b>{qty:.4f}</b><br>
                             Объём позиции без плеча: <b>{position_usd_no_lev:.2f} USDT</b><br>
-                            Объём позиции c плечом x{leverage}: <b>{position_usd_with_lev:.2f} USDT</b><br>
+                            <span style="text-decoration: underline; text-decoration-color: red; text-decoration-thickness: 2px;">
+                                Объём позиции c плечом x{leverage}: <b>{position_usd_with_lev:.2f} USDT</b>
+                            </span><br>
                             R:R (TP:SL): <b>{rr:.2f} : 1</b>
                         </span>
                     </div>
