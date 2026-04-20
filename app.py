@@ -60,9 +60,6 @@ if "rec_stop_distance" not in st.session_state:
     st.session_state["rec_stop_distance"] = None
 
 show_analysis = st.checkbox("Показать аналитику фьючерса и стоп 10% ATR", value=False)
-
-if show_analysis:
-    try:
         
 if show_analysis:
     try:
