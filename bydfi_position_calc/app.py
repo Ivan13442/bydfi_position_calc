@@ -42,6 +42,7 @@ if "rec_stop_distance" not in st.session_state:
     st.session_state["rec_stop_distance"] = None
 
 show_analysis = st.checkbox("Показать аналитику фьючерса и стоп 10% ATR", value=False)
+
 if show_analysis:
     try:
         # подключаем BYDFi
@@ -83,9 +84,13 @@ if show_analysis:
                         matched_symbol = m_symbol
                         break
 
-        if matched_symbol is None:
+                if matched_symbol is None:
             st.error(f"Фьючерсный тикер не найден на BYDFi: **{user_raw}**.")
         else:
+            # сначала берём текущую цену
+            ticker = exchange.fetch_ticker(matched_symbol)
+            last_price = ticker["last"]
+
             # --- НОВАЯ ЛОГИКА ВЫБОРА СВЕЧЕЙ ДЛЯ ATR ---
             ohlcv = None
             used_timeframe = "4h"
