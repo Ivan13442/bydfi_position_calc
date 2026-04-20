@@ -84,23 +84,17 @@ if show_analysis:
             last_price = ticker["last"]
 
             ohlcv = None
-            used_timeframe = None
+used_timeframe = "4h"
 
-            try:
-                ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="1d", limit=14)
-                used_timeframe = "1d"
-            except Exception as e_1d:
-                try:
-                    ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=14)
-                    used_timeframe = "4h"
-                except Exception as e_4h:
-                    st.error(
-                        f"Не удалось получить свечи (OHLCV) по {matched_symbol} на BYDFi.\n\n"
-                        f"Ошибка для 1d: {e_1d}\n"
-                        f"Ошибка для 4h: {e_4h}"
-                    )
-                    ohlcv = None
-
+try:
+    # берём 30 четырёхчасовиков ≈ 5 дней (6 свечей в день)
+    ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=30)
+except Exception as e_4h:
+    st.error(
+        f"Не удалось получить 4h свечи (OHLCV) по {matched_symbol} на BYDFi.\n\n"
+        f"Ошибка для 4h: {e_4h}"
+    )
+    ohlcv = None
             if not ohlcv:
                 st.stop()
 
