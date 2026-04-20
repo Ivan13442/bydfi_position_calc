@@ -84,7 +84,7 @@ if show_analysis:
                         matched_symbol = m_symbol
                         break
 
-                if matched_symbol is None:
+        if matched_symbol is None:
             st.error(f"Фьючерсный тикер не найден на BYDFi: **{user_raw}**.")
         else:
             # сначала берём текущую цену
