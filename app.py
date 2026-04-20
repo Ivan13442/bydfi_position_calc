@@ -43,6 +43,30 @@ if "rec_stop_distance" not in st.session_state:
 
 show_analysis = st.checkbox("Показать аналитику фьючерса и стоп 10% ATR", value=False)
 
+# ---------- 2. Риск и депозит ----------
+
+st.subheader("1️⃣ Риск и депозит")
+
+col_r1, col_r2 = st.columns([2, 1])
+
+default_balance = float(settings.get("balance", 1000.0))
+default_saved_risk = float(settings.get("risk_percent", 1.0))
+
+with col_r1:
+    balance = st.number_input("💰 Депозит, USDT", value=default_balance, min_value=0.0, step=100.0)
+
+with col_r2:
+    # убрали режим кнопок, оставляем только ручной ввод риска
+    risk_percent = st.number_input(
+        "⚠️ Риск на сделку, %",
+        value=default_saved_risk,
+        min_value=0.01,
+        max_value=10.0,
+        step=0.01
+    )
+
+st.write(f"Текущий риск: **{risk_percent:.2f}%** от депозита")
+
 if show_analysis:
     try:
         # подключаем BYDFi
@@ -86,16 +110,15 @@ if show_analysis:
         if matched_symbol is None:
             st.error(f"Фьючерсный тикер не найден на BYDFi: **{user_raw}**.")
         else:
-            # текущая цена
+            # 1) текущая цена
             ticker = exchange.fetch_ticker(matched_symbol)
             last_price = ticker["last"]
 
-            # --- НОВАЯ ЛОГИКА ВЫБОРА СВЕЧЕЙ ДЛЯ ATR ---
+            # 2) берём 30 последних 4h свечей (≈ 5 дней по 6 свечей)
             ohlcv = None
             used_timeframe = "4h"
 
             try:
-                # берём 30 четырёхчасовиков ≈ 5 дней (6 свечей в день)
                 ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=30)
             except Exception as e_4h:
                 st.error(
@@ -107,11 +130,16 @@ if show_analysis:
             if not ohlcv:
                 st.stop()
 
-            df_ohlc = pd.DataFrame(ohlcv, columns=["time", "open", "high", "low", "close", "volume"])
+            # 3) переводим в DataFrame
+            df_ohlc = pd.DataFrame(
+                ohlcv,
+                columns=["time", "open", "high", "low", "close", "volume"]
+            )
 
-            # DEBUG: сколько свечей реально получили
-            st.write(f"DEBUG: получено {len(df_ohlc)} 4h свечей для ATR")
+            # (опционально) отладка: сколько свечей реально получили
+            st.caption(f"DEBUG: получено {len(df_ohlc)} 4h свечей для ATR (должно быть ≈30)")
 
+            # 4) считаем ATR(14) по этим 30 свечам
             df_ohlc["prev_close"] = df_ohlc["close"].shift(1)
             df_ohlc["tr1"] = df_ohlc["high"] - df_ohlc["low"]
             df_ohlc["tr2"] = (df_ohlc["high"] - df_ohlc["prev_close"]).abs()
@@ -125,6 +153,7 @@ if show_analysis:
                 atr_10 = atr * 0.10           # 10% ATR
                 max_luft = atr_10 * 0.10      # 10% от рекомендуемого стопа = 1% ATR
 
+                # 5) диапазон дня в %, для рекомендации плеча
                 range_pct = (df_ohlc["high"] - df_ohlc["low"]) / df_ohlc["close"] * 100
                 avg_range = range_pct.mean()
 
@@ -139,9 +168,10 @@ if show_analysis:
                 else:
                     rec_leverage = 5
 
+                # вывод
                 st.write(f"Найденный фьючерсный символ на BYDFi: **{matched_symbol}**")
                 st.write(f"Текущая цена: **{last_price:.4f} USDT**")
-                st.write(f"ATR(14, {used_timeframe}, по 30×4h свечам): **{atr:.4f} USDT**")
+                st.write(f"ATR(14) по последним 30×4h свечам (~5 дней): **{atr:.4f} USDT**")
 
                 st.markdown(
                     f"""
@@ -183,29 +213,6 @@ if show_analysis:
                 st.caption("Расстояние стопа 10% ATR сохранено и используется как подсказка в поле SL.")
     except Exception as e:
         st.error(f"Ошибка при запросе к BYDFi: {e}")
-# ---------- 2. Риск и депозит ----------
-
-st.subheader("1️⃣ Риск и депозит")
-
-col_r1, col_r2 = st.columns([2, 1])
-
-default_balance = float(settings.get("balance", 1000.0))
-default_saved_risk = float(settings.get("risk_percent", 1.0))
-
-with col_r1:
-    balance = st.number_input("💰 Депозит, USDT", value=default_balance, min_value=0.0, step=100.0)
-
-with col_r2:
-    # убрали режим кнопок, оставляем только ручной ввод риска
-    risk_percent = st.number_input(
-        "⚠️ Риск на сделку, %",
-        value=default_saved_risk,
-        min_value=0.01,
-        max_value=10.0,
-        step=0.01
-    )
-
-st.write(f"Текущий риск: **{risk_percent:.2f}%** от депозита")
 
 # ---------- 3. Параметры входа ----------
 
