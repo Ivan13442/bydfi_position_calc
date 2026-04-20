@@ -26,7 +26,8 @@ def get_ticker_and_ohlcv(matched_symbol: str):
 
 SETTINGS_FILE = "settings.json"
 
-def load_settings():
+
+def load_settings() -> dict:
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
@@ -35,6 +36,7 @@ def load_settings():
             return {}
     return {}
 
+
 def save_settings(data: dict):
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -42,7 +44,15 @@ def save_settings(data: dict):
     except:
         pass
 
-settings = load_settings()
+
+@st.cache_data(show_spinner=False)
+def load_settings_cached() -> dict:
+    # обёртка над load_settings, чтобы не читать файл при каждом ререндере
+    return load_settings()
+
+
+# используем кешированный вариант
+settings = load_settings_cached()
 
 # ---------- заголовок ----------
 
