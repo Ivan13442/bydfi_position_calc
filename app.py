@@ -42,20 +42,24 @@ if "rec_stop_distance" not in st.session_state:
     st.session_state["rec_stop_distance"] = None
 
 show_analysis = st.checkbox("Показать аналитику фьючерса и стоп 10% ATR", value=False)
-
 if show_analysis:
     try:
+        # подключаем BYDFi
         exchange = ccxt.bydfi({
             "enableRateLimit": True,
         })
 
+        # загружаем рынки
         markets = exchange.load_markets()
 
+        # приводим пользовательский ввод к формату BASE+QUOTE (BTCUSDT, ETHUSDT и т.п.)
         user_raw = fut_symbol_input.upper().replace("PERP", "").strip()
 
+        # быстрый маппинг популярных тикеров на BYDFi-формат
         direct_map = {
             "BTCUSDT": "BTC/USDT:USDT",
             "ETHUSDT": "ETH/USDT:USDT",
+            # при желании добавишь сюда ещё тикеры
         }
 
         if user_raw in direct_map:
@@ -63,6 +67,7 @@ if show_analysis:
         else:
             matched_symbol = None
 
+            # если не нашли в direct_map — пробуем искать по markets
             for m_symbol, m_info in markets.items():
                 base = m_info.get("base", "")
                 quote = m_info.get("quote", "")
@@ -71,6 +76,7 @@ if show_analysis:
                     matched_symbol = m_symbol
                     break
 
+            # если по compact не нашли, пробуем прямым совпадением по ключу
             if matched_symbol is None:
                 for m_symbol in markets.keys():
                     if m_symbol.replace("-", "").replace("/", "").replace(":", "").upper() == user_raw:
@@ -80,21 +86,20 @@ if show_analysis:
         if matched_symbol is None:
             st.error(f"Фьючерсный тикер не найден на BYDFi: **{user_raw}**.")
         else:
-            ticker = exchange.fetch_ticker(matched_symbol)
-            last_price = ticker["last"]
-
+            # --- НОВАЯ ЛОГИКА ВЫБОРА СВЕЧЕЙ ДЛЯ ATR ---
             ohlcv = None
-used_timeframe = "4h"
+            used_timeframe = "4h"
 
-try:
-    # берём 30 четырёхчасовиков ≈ 5 дней (6 свечей в день)
-    ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=30)
-except Exception as e_4h:
-    st.error(
-        f"Не удалось получить 4h свечи (OHLCV) по {matched_symbol} на BYDFi.\n\n"
-        f"Ошибка для 4h: {e_4h}"
-    )
-    ohlcv = None
+            try:
+                # берём 30 четырёхчасовиков ≈ 5 дней (6 свечей в день)
+                ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=30)
+            except Exception as e_4h:
+                st.error(
+                    f"Не удалось получить 4h свечи (OHLCV) по {matched_symbol} на BYDFi.\n\n"
+                    f"Ошибка для 4h: {e_4h}"
+                )
+                ohlcv = None
+
             if not ohlcv:
                 st.stop()
 
@@ -110,8 +115,8 @@ except Exception as e_4h:
             if pd.isna(atr) or atr <= 0:
                 st.error("Не удалось корректно посчитать ATR по этому фьючерсу.")
             else:
-                atr_10 = atr * 0.10
-                max_luft = atr_10 * 0.10
+                atr_10 = atr * 0.10           # 10% ATR
+                max_luft = atr_10 * 0.10      # 10% от рекомендуемого стопа = 1% ATR
 
                 range_pct = (df_ohlc["high"] - df_ohlc["low"]) / df_ohlc["close"] * 100
                 avg_range = range_pct.mean()
@@ -131,6 +136,7 @@ except Exception as e_4h:
                 st.write(f"Текущая цена: **{last_price:.4f} USDT**")
                 st.write(f"ATR(14, {used_timeframe}): **{atr:.4f} USDT**")
 
+                # синяя рамка для максимального люфта
                 st.markdown(
                     f"""
                     <div style="
@@ -148,6 +154,7 @@ except Exception as e_4h:
                     unsafe_allow_html=True,
                 )
 
+                # жёлтая рамка с рекомендуемым стопом 10% ATR
                 st.markdown(
                     f"""
                     <div style="

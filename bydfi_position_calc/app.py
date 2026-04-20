@@ -92,25 +92,17 @@ if show_analysis:
 
             # пробуем сначала дневные свечи для ATR(14), если BYDFi даёт 500 - падаем на 4h
             ohlcv = None
-            used_timeframe = None
+used_timeframe = "4h"
 
-            # 1) пробуем 1d
-            try:
-                ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="1d", limit=14)
-                used_timeframe = "1d"
-            except Exception as e_1d:
-                # если именно Internal error! или другая биржевая ошибка — пробуем 4h
-                try:
-                    ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=14)
-                    used_timeframe = "4h"
-                except Exception as e_4h:
-                    st.error(
-                        f"Не удалось получить свечи (OHLCV) по {matched_symbol} на BYDFi.\n\n"
-                        f"Ошибка для 1d: {e_1d}\n"
-                        f"Ошибка для 4h: {e_4h}"
-                    )
-                    ohlcv = None
-
+try:
+    # берём 30 четырёхчасовиков ≈ 5 дней (6 свечей в день)
+    ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=30)
+except Exception as e_4h:
+    st.error(
+        f"Не удалось получить 4h свечи (OHLCV) по {matched_symbol} на BYDFi.\n\n"
+        f"Ошибка для 4h: {e_4h}"
+    )
+    ohlcv = None
             if not ohlcv:
                 st.stop()
 
