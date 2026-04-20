@@ -109,7 +109,7 @@ if show_analysis:
                 st.stop()
 
             df_ohlc = pd.DataFrame(ohlcv, columns=["time", "open", "high", "low", "close", "volume"])
-
+st.write(f"DEBUG: получено {len(df_ohlc)} 4h свечей для ATR")
             df_ohlc["prev_close"] = df_ohlc["close"].shift(1)
             df_ohlc["tr1"] = df_ohlc["high"] - df_ohlc["low"]
             df_ohlc["tr2"] = (df_ohlc["high"] - df_ohlc["prev_close"]).abs()
