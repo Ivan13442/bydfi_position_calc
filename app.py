@@ -461,7 +461,10 @@ st.markdown(
         font-size: 12px;
         color: #9ca3af;
     ">
-        Разработка: Ivan Averyanov
+        Разработка: 
+        <a href="https://t.me/averyanoviv" target="_blank" style="color: #60a5fa; text-decoration: none;">
+            @averyanoviv
+        </a>
     </div>
     """,
     unsafe_allow_html=True,
