@@ -135,7 +135,6 @@ if show_analysis:
                 columns=["time", "open", "high", "low", "close", "volume"]
             )
 
-            # DEBUG: сколько свечей реально получили
             st.caption(f"DEBUG: получено {len(df_4h)} 4h свечей (ожидаем 30)")
 
             # 3) группируем по 6 4h свечей в один "день"
@@ -164,8 +163,6 @@ if show_analysis:
             # берём последние 5 "дней"
             days = days[-5:]
             df_days = pd.DataFrame(days)
-
-            st.caption(f"DEBUG: сформировано {len(df_days)} дневных баров по 6×4h (ожидаем 5)")
 
             if len(df_days) < 5:
                 st.error("Недостаточно дневных баров для расчёта ATR(5).")
@@ -202,7 +199,7 @@ if show_analysis:
 
                 st.write(f"Найденный фьючерсный символ на BYDFi: **{matched_symbol}**")
                 st.write(f"Текущая цена: **{last_price:.4f} USDT**")
-                st.write(f"ATR(5) по последним 5 дням (каждый день = 6×4h): **{atr:.4f} USDT**")
+                st.write(f"ATR(5): **{atr:.4f} USDT**")
 
                 # твои рамки
                 st.markdown(
