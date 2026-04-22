@@ -4,29 +4,6 @@ import ccxt
 import json
 import os
 
-st.markdown(
-    """
-    <style>
-    /* фон всего приложения */
-    .stApp {
-        background-color: #020617 !important;  /* очень тёмный */
-        color: #e5e7eb !important;             /* светлый текст */
-    }
-
-    /* фон и текст контейнеров */
-    .stMarkdown, .stText, .stNumberInput, .stCheckbox, .stRadio, .stButton {
-        color: #e5e7eb !important;
-    }
-
-    /* опционально: фон сайдбара, если ты его используешь */
-    section[data-testid="stSidebar"] {
-        background-color: #020617 !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 # ---------- кешируем тяжелые операции ----------
 
 @st.cache_resource(show_spinner=False)
