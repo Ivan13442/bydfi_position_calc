@@ -3,6 +3,30 @@ import pandas as pd
 import ccxt
 import json
 import os
+
+st.markdown(
+    """
+    <style>
+    /* фон всего приложения */
+    .stApp {
+        background-color: #020617 !important;  /* очень тёмный */
+        color: #e5e7eb !important;             /* светлый текст */
+    }
+
+    /* фон и текст контейнеров */
+    .stMarkdown, .stText, .stNumberInput, .stCheckbox, .stRadio, .stButton {
+        color: #e5e7eb !important;
+    }
+
+    /* опционально: фон сайдбара, если ты его используешь */
+    section[data-testid="stSidebar"] {
+        background-color: #020617 !important;
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # ---------- кешируем тяжелые операции ----------
 
 @st.cache_resource(show_spinner=False)
@@ -380,35 +404,36 @@ if st.button("🚀 Рассчитать сделку"):
             col_out1, col_out2 = st.columns(2)
 
             with col_out1:
-                st.markdown(
-                    f"""
-                    <div style="
-                        border: 2px solid #0ea5e9;
-                        background-color: #e0f2fe;
-                        padding: 12px 16px;
-                        border-radius: 10px;
-                        margin: 8px 0;
-                        color: #0369a1;
-                        font-weight: 500;
-                        line-height: 1.5;
-                    ">
-                        <div style="font-size: 15px; font-weight: 700; margin-bottom: 4px;">
-                            📌 Итог по сделке
-                        </div>
-                        <div style="font-size: 13px; margin-bottom: 6px; color: {verdict_color};">
-                            {verdict}
-                        </div>
-                        <span style="font-size: 13px; color: #0f172a;">
-                            Риск на сделку: <b>{risk_amount:.2f} USDT</b><br>
-                            Кол-во монет: <b>{qty:.4f}</b><br>
-                            Объём позиции с плечом x{leverage}: <b>{position_usd_no_lev:.2f} USDT</b><br>
-                            <span style="text-decoration: underline; text-decoration-color: red; text-decoration-thickness: 2px;">
-                            R:R (TP:SL): <b>{rr:.2f} : 1</b>
-                        </span>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+    st.markdown(
+        f"""
+        <div style="
+            border: 2px solid #0ea5e9;
+            background-color: #e0f2fe;
+            padding: 12px 16px;
+            border-radius: 10px;
+            margin: 8px 0;
+            color: #0369a1;
+            font-weight: 500;
+            line-height: 1.5;
+        ">
+            <div style="font-size: 15px; font-weight: 700; margin-bottom: 4px;">
+                📌 Итог по сделке
+            </div>
+            <div style="font-size: 13px; margin-bottom: 6px; color: {verdict_color};">
+                {verdict}
+            </div>
+            <span style="font-size: 13px; color: #0f172a;">
+                Риск на сделку: <b>{risk_amount:.2f} USDT</b><br>
+                Кол-во монет: <b>{qty:.4f}</b><br>
+                <span style="text-decoration: underline; text-decoration-color: red; text-decoration-thickness: 2px;">
+                    Объём позиции с плечом x{leverage}: <b>{position_usd_no_lev:.2f} USDT</b>
+                </span><br>
+                R:R (TP:SL): <b>{rr:.2f} : 1</b>
+            </span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
             with col_out2:
                 st.markdown(
