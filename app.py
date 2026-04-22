@@ -3,7 +3,6 @@ import pandas as pd
 import ccxt
 import json
 import os
-
 # ---------- кешируем тяжелые операции ----------
 
 @st.cache_resource(show_spinner=False)
@@ -115,7 +114,7 @@ if show_analysis:
                 ticker, ohlcv = get_ticker_and_ohlcv(matched_symbol)
             except Exception as e_4h:
                 st.error(
-                    f"Не удалось получить данные по {matched_symbol} на BYDFi.\n\n"
+                    f"Не удалось получить данные по {matched_symbol} на BYDFi.\\n\\n"
                     f"Ошибка: {e_4h}"
                 )
                 ohlcv = None
@@ -378,7 +377,7 @@ if st.button("🚀 Рассчитать сделку"):
                 verdict = "❌ R:R низкий, сделку лучше не брать"
                 verdict_color = "#b91c1c"
 
-                        col_out1, col_out2 = st.columns(2)
+            col_out1, col_out2 = st.columns(2)
 
             with col_out1:
                 st.markdown(
@@ -402,8 +401,9 @@ if st.button("🚀 Рассчитать сделку"):
                         <span style="font-size: 13px; color: #0f172a;">
                             Риск на сделку: <b>{risk_amount:.2f} USDT</b><br>
                             Кол-во монет: <b>{qty:.4f}</b><br>
+                            Объём позиции без плеча: <b>{position_usd_no_lev:.2f} USDT</b><br>
                             <span style="text-decoration: underline; text-decoration-color: red; text-decoration-thickness: 2px;">
-                                Объём позиции с плечом x{leverage}: <b>{position_usd_no_lev:.2f} USDT</b>
+                                Объём позиции c плечом x{leverage}: <b>{position_usd_with_lev:.2f} USDT</b>
                             </span><br>
                             R:R (TP:SL): <b>{rr:.2f} : 1</b>
                         </span>
