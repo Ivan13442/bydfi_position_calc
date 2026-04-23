@@ -340,7 +340,34 @@ with col_p3:
         tp_price = float(tp_str.replace(",", "."))
     except ValueError:
         tp_price = 0.0
+        
+# ---------- 4. Комиссии биржи ----------
 
+st.subheader("3️⃣ Комиссии биржи")
+
+col_fee1, col_fee2 = st.columns(2)
+
+with col_fee1:
+    taker_fee_percent = st.number_input(
+        "Taker fee, %",
+        value=0.05,  # 0.05% по умолчанию
+        min_value=0.0,
+        max_value=1.0,
+        step=0.01,
+        help="Комиссия тейкера в процентах (например, 0.05)"
+    )
+    taker_fee = taker_fee_percent / 100.0  # перевели в долю
+
+with col_fee2:
+    maker_fee_percent = st.number_input(
+        "Maker fee, %",
+        value=0.02,  # 0.02% по умолчанию
+        min_value=0.0,
+        max_value=1.0,
+        step=0.01,
+        help="Комиссия мейкера в процентах (если нужна в других расчётах)"
+    )
+    maker_fee = maker_fee_percent / 100.0
 # ---------- 5. Расчет ----------
 
 st.subheader("4️⃣ Расчет")
