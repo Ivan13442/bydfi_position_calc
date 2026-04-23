@@ -479,7 +479,7 @@ if st.button("🚀 Рассчитать сделку"):
                 "balance": balance,
                 "risk_percent": risk_percent,
                 "leverage": leverage,
-                "taker_fee": taker_fee * 100,
+                "commission": commission_rate * 100,
                 "side": side,
             }
             save_settings(new_settings)
