@@ -293,15 +293,19 @@ with col_extra2:
         step=1,
     )
 
+# --- Entry как текст, чтобы не резать знаки ---
 with col_p1:
-    entry_price = st.number_input(
+    entry_str = st.text_input(
         "📈 Цена входа (Entry)",
-        value=default_entry,
-        min_value=0.00000001,
-        step=0.00000001,
-        format="%.8f",
+        value=str(default_entry),
+        help="Можно вводить любое количество знаков после запятой.",
     )
+    try:
+        entry_price = float(entry_str.replace(",", "."))
+    except ValueError:
+        entry_price = 0.0
 
+# --- SL как текст, с учётом rec_stop_distance ---
 with col_p2:
     rec_stop_distance = st.session_state.get("rec_stop_distance", None)
 
@@ -316,29 +320,26 @@ with col_p2:
     if suggested_sl <= 0:
         suggested_sl = 0.00000001
 
-    stop_price = st.number_input(
+    stop_str = st.text_input(
         "🛑 Стоп-лосс (SL)",
-        value=float(suggested_sl),
-        min_value=0.00000001,
-        step=0.00000001,
-        format="%.8f",
+        value=f"{suggested_sl}",
         help="Если ниже считали ATR, сюда подставлен стоп по 10% ATR, можно скорректировать.",
     )
+    try:
+        stop_price = float(stop_str.replace(",", "."))
+    except ValueError:
+        stop_price = 0.0
 
+# --- TP как текст ---
 with col_p3:
-    tp_price = st.number_input(
+    tp_str = st.text_input(
         "🎯 Тейк-профит (TP)",
-        value=default_tp,
-        min_value=0.00000001,
-        step=0.00000001,
-        format="%.8f",
+        value=str(default_tp),
     )
-# ---------- 4. Комиссии ----------
-
-st.subheader("3️⃣ Комиссии (можно оставить по умолчанию)")
-default_fee = float(settings.get("taker_fee", 0.06))
-taker_fee = st.number_input("Комиссия (taker), % за сделку", value=default_fee, min_value=0.0, max_value=1.0, step=0.01)
-taker_fee /= 100.0
+    try:
+        tp_price = float(tp_str.replace(",", "."))
+    except ValueError:
+        tp_price = 0.0
 
 # ---------- 5. Расчет ----------
 
