@@ -283,11 +283,24 @@ default_leverage = int(settings.get("leverage", 10))
 
 with col_extra1:
     side = st.radio("Направление сделки", ["Лонг", "Шорт"], index=0 if default_side == "Лонг" else 1)
+
 with col_extra2:
-    leverage = st.number_input("🔧 Плечо (leverage)", value=default_leverage, min_value=1, max_value=200, step=1)
+    leverage = st.number_input(
+        "🔧 Плечо (leverage)",
+        value=default_leverage,
+        min_value=1,
+        max_value=200,
+        step=1,
+    )
 
 with col_p1:
-    entry_price = st.number_input("📈 Цена входа (Entry)", value=default_entry, min_value=0.0001)
+    entry_price = st.number_input(
+        "📈 Цена входа (Entry)",
+        value=default_entry,
+        min_value=0.00000001,
+        step=0.00000001,
+        format="%.8f",
+    )
 
 with col_p2:
     rec_stop_distance = st.session_state.get("rec_stop_distance", None)
@@ -301,18 +314,25 @@ with col_p2:
         suggested_sl = default_sl
 
     if suggested_sl <= 0:
-        suggested_sl = 0.0001
+        suggested_sl = 0.00000001
 
     stop_price = st.number_input(
         "🛑 Стоп-лосс (SL)",
         value=float(suggested_sl),
-        min_value=0.0001,
-        help="Если ниже считали ATR, сюда подставлен стоп по 10% ATR, можно скорректировать."
+        min_value=0.00000001,
+        step=0.00000001,
+        format="%.8f",
+        help="Если ниже считали ATR, сюда подставлен стоп по 10% ATR, можно скорректировать.",
     )
 
 with col_p3:
-    tp_price = st.number_input("🎯 Тейк-профит (TP)", value=default_tp, min_value=0.0001)
-
+    tp_price = st.number_input(
+        "🎯 Тейк-профит (TP)",
+        value=default_tp,
+        min_value=0.00000001,
+        step=0.00000001,
+        format="%.8f",
+    )
 # ---------- 4. Комиссии ----------
 
 st.subheader("3️⃣ Комиссии (можно оставить по умолчанию)")
