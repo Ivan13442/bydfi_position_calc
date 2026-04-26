@@ -393,7 +393,7 @@ if st.button("🚀 Рассчитать сделку"):
             position_usd_with_lev = position_usd_no_lev / leverage
             rr = tp_distance / stop_distance
 
-            fees = position_usd_with_lev * commission_rate * 2
+            fees = position_usd_no_lev * commission_rate * 2
         
             profit_gross = tp_distance * qty
             loss_gross = stop_distance * qty
