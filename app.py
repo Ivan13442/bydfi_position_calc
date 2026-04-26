@@ -347,7 +347,7 @@ st.subheader("3️⃣ Комиссия биржи")
 
 commission_percent = st.number_input(
     "Комиссия биржи, %",
-    value=0.05,          # по умолчанию 0.05% за одну операцию
+    value=0.06,          # по умолчанию 0.06% за одну операцию
     min_value=0.0,
     max_value=1.0,
     step=0.01,
