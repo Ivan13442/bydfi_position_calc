@@ -415,7 +415,6 @@ if st.button("🚀 Рассчитать сделку"):
                 verdict_color = "#b91c1c"
 
             col_out1, col_out2 = st.columns(2)
-
             with col_out1:
     st.markdown(
         f"""
