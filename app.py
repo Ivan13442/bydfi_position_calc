@@ -390,7 +390,7 @@ if st.button("🚀 Рассчитать сделку"):
         else:
             qty = risk_amount / stop_distance
             position_usd_no_lev = qty * entry_price
-            position_usd_with_lev = position_usd_no_lev * leverage
+            position_usd_with_lev = position_usd_no_lev / leverage
             rr = tp_distance / stop_distance
 
             fees = position_usd_with_lev * commission_rate * 2
@@ -438,8 +438,8 @@ if st.button("🚀 Рассчитать сделку"):
             <span style="font-size: 13px; color: #0f172a;">
                 Риск на сделку: <b>{risk_amount:.2f} USDT</b><br>
                 Кол-во монет: <b>{qty:.4f}</b><br>
-                Объём позиции без плеча: <b>{position_usd_no_lev:.2f} USDT</b><br>
-                Объём позиции с плечом x{leverage}: <b>{position_usd_with_lev:.2f} USDT</b><br>
+                Объём позиции без плеча: <b>{position_usd_with_lev:.2f} USDT</b><br>
+                Объём позиции с плечом x{leverage}: <b>{position_usd_no_lev:.2f} USDT</b><br>
             </span><br>
             <span style="font-size: 13px; color: #0f172a;">
                 R:R (TP:SL): <b>{rr:.2f} : 1</b>
