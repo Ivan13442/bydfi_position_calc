@@ -417,7 +417,7 @@ if st.button("🚀 Рассчитать сделку"):
             col_out1, col_out2 = st.columns(2)
             
             with col_out1:
-    st.markdown(
+                st.markdown(
         f"""
         <div style="
             border: 2px solid #0ea5e9;
