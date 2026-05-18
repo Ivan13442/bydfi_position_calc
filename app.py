@@ -3,25 +3,25 @@ import pandas as pd
 import ccxt
 import json
 import os
+
 # ---------- кешируем тяжелые операции ----------
 
 @st.cache_resource(show_spinner=False)
 def get_exchange():
-    # создаём клиент BYDFi один раз на процесс
     return ccxt.bydfi({"enableRateLimit": True})
 
-@st.cache_data(ttl=300, show_spinner=False)  # кеш 5 минут
+@st.cache_data(ttl=300, show_spinner=False)
 def get_markets():
     exchange = get_exchange()
     return exchange.load_markets()
 
-@st.cache_data(ttl=60, show_spinner=False)  # кеш 60 секунд на тикер
+@st.cache_data(ttl=60, show_spinner=False)
 def get_ticker_and_ohlcv(matched_symbol: str):
     exchange = get_exchange()
     ticker = exchange.fetch_ticker(matched_symbol)
     ohlcv = exchange.fetch_ohlcv(matched_symbol, timeframe="4h", limit=30)
     return ticker, ohlcv
-    
+
 # ---------- сохранение настроек ----------
 
 SETTINGS_FILE = "settings.json"
@@ -32,7 +32,7 @@ def load_settings() -> dict:
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except Exception:
             return {}
     return {}
 
@@ -41,18 +41,18 @@ def save_settings(data: dict):
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    except:
+    except Exception:
         pass
 
 
-@st.cache_data(show_spinner=False)
-def load_settings_cached() -> dict:
-    # обёртка над load_settings, чтобы не читать файл при каждом ререндере
-    return load_settings()
+# ---------- загрузка настроек один раз за сессию ----------
 
+# Читаем настройки один раз при старте сессии, не при каждом ререндере.
+# После save_settings() обновляем st.session_state вручную — файл не перечитываем.
+if "settings" not in st.session_state:
+    st.session_state["settings"] = load_settings()
 
-# используем кешированный вариант
-settings = load_settings_cached()
+settings = st.session_state["settings"]
 
 # ---------- заголовок ----------
 
@@ -70,27 +70,24 @@ if "rec_stop_distance" not in st.session_state:
     st.session_state["rec_stop_distance"] = None
 
 show_analysis = st.checkbox("Показать аналитику фьючерса и стоп 10% ATR", value=False)
-        
+
 if show_analysis:
+    # быстрый маппинг популярных тикеров на BYDFi-формат
+    direct_map = {
+        "BTCUSDT": "BTC/USDT:USDT",
+        "ETHUSDT": "ETH/USDT:USDT",
+    }
+
+    user_raw = fut_symbol_input.upper().replace("PERP", "").strip()
+
     try:
-        # рынки берём из кеша
-        markets = get_markets()
-
-        # приводим пользовательский ввод к формату BASE+QUOTE (BTCUSDT, ETHUSDT и т.п.)
-        user_raw = fut_symbol_input.upper().replace("PERP", "").strip()
-
-        # быстрый маппинг популярных тикеров на BYDFi-формат
-        direct_map = {
-            "BTCUSDT": "BTC/USDT:USDT",
-            "ETHUSDT": "ETH/USDT:USDT",
-        }
+        with st.spinner("Загружаем рынки BYDFi..."):
+            markets = get_markets()
 
         if user_raw in direct_map:
             matched_symbol = direct_map[user_raw]
         else:
             matched_symbol = None
-
-            # если не нашли в direct_map — пробуем искать по markets
             for m_symbol, m_info in markets.items():
                 base = m_info.get("base", "")
                 quote = m_info.get("quote", "")
@@ -99,7 +96,6 @@ if show_analysis:
                     matched_symbol = m_symbol
                     break
 
-            # если по compact не нашли, пробуем прямым совпадением по ключу
             if matched_symbol is None:
                 for m_symbol in markets.keys():
                     if m_symbol.replace("-", "").replace("/", "").replace(":", "").upper() == user_raw:
@@ -109,137 +105,122 @@ if show_analysis:
         if matched_symbol is None:
             st.error(f"Фьючерсный тикер не найден на BYDFi: **{user_raw}**.")
         else:
-            # 1) тикер и 4h свечи берём из кешируемой функции
             try:
-                ticker, ohlcv = get_ticker_and_ohlcv(matched_symbol)
+                with st.spinner(f"Получаем данные по {matched_symbol}..."):
+                    ticker, ohlcv = get_ticker_and_ohlcv(matched_symbol)
             except Exception as e_4h:
                 st.error(
-                    f"Не удалось получить данные по {matched_symbol} на BYDFi.\\n\\n"
+                    f"Не удалось получить данные по {matched_symbol} на BYDFi.\n\n"
                     f"Ошибка: {e_4h}"
                 )
-                ohlcv = None
                 ticker = None
+                ohlcv = None
 
-            if ticker is None:
-                st.stop()
+            if ticker is not None:
+                last_price = ticker["last"]
 
-            last_price = ticker["last"]
-
-            if not ohlcv or len(ohlcv) < 30:
-                st.error("Недостаточно 4h свечей для расчёта дневного ATR (нужно 30).")
-                st.stop()
-
-            # переводим в DataFrame
-            df_4h = pd.DataFrame(
-                ohlcv,
-                columns=["time", "open", "high", "low", "close", "volume"]
-            )
-
-            st.caption(f"DEBUG: получено {len(df_4h)} 4h свечей (ожидаем 30)")
-
-            # 3) группируем по 6 4h свечей в один "день"
-            days = []
-            n = len(df_4h)
-            # берём последние 30 свечей, кратно 6
-            start_idx = n - (n // 6) * 6
-            chunked = df_4h.iloc[start_idx:]
-
-            # идём по блокам 6 свечей от старых к новым
-            for i in range(0, len(chunked), 6):
-                block = chunked.iloc[i:i+6]
-                if len(block) < 6:
-                    continue
-                day_open = block["open"].iloc[0]
-                day_close = block["close"].iloc[-1]
-                day_high = block["high"].max()
-                day_low = block["low"].min()
-                days.append({
-                    "open": day_open,
-                    "high": day_high,
-                    "low": day_low,
-                    "close": day_close,
-                })
-
-            # берём последние 5 "дней"
-            days = days[-5:]
-            df_days = pd.DataFrame(days)
-
-            if len(df_days) < 5:
-                st.error("Недостаточно дневных баров для расчёта ATR(5).")
-                st.stop()
-
-            # 4) считаем ATR(5) по этим 5 "дням"
-            df_days["prev_close"] = df_days["close"].shift(1)
-            df_days["tr1"] = df_days["high"] - df_days["low"]
-            df_days["tr2"] = (df_days["high"] - df_days["prev_close"]).abs()
-            df_days["tr3"] = (df_days["low"] - df_days["prev_close"]).abs()
-            df_days["tr"] = df_days[["tr1", "tr2", "tr3"]].max(axis=1)
-            atr = df_days["tr"].rolling(window=5).mean().iloc[-1]
-
-            if pd.isna(atr) or atr <= 0:
-                st.error("Не удалось корректно посчитать ATR(5) по 5 дневным барам.")
-            else:
-                atr_10 = atr * 0.10           # 10% ATR
-                max_luft = atr_10 * 0.10      # 10% от рекомендуемого стопа = 1% ATR
-
-                # дневной диапазон в % для рекомендации плеча
-                range_pct = (df_days["high"] - df_days["low"]) / df_days["close"] * 100
-                avg_range = range_pct.mean()
-
-                if avg_range < 1:
-                    rec_leverage = 25
-                elif avg_range < 2:
-                    rec_leverage = 20
-                elif avg_range < 3:
-                    rec_leverage = 15
-                elif avg_range < 5:
-                    rec_leverage = 10
+                if not ohlcv or len(ohlcv) < 30:
+                    st.error("Недостаточно 4h свечей для расчёта дневного ATR (нужно 30).")
                 else:
-                    rec_leverage = 5
+                    df_4h = pd.DataFrame(
+                        ohlcv,
+                        columns=["time", "open", "high", "low", "close", "volume"]
+                    )
 
-                st.write(f"Найденный фьючерсный символ на BYDFi: **{matched_symbol}**")
-                st.write(f"Текущая цена: **{last_price:.4f} USDT**")
-                st.write(f"ATR(5): **{atr:.4f} USDT**")
+                    st.caption(f"DEBUG: получено {len(df_4h)} 4h свечей (ожидаем 30)")
 
-                # твои рамки
-                st.markdown(
-                    f"""
-                    <div style="
-                        border: 2px solid #3b82f6;
-                        background-color: #eff6ff;
-                        padding: 10px 14px;
-                        border-radius: 8px;
-                        margin: 8px 0;
-                        color: #1d4ed8;
-                        font-weight: 600;
-                    ">
-                        Максимальный люфт от уровня: {max_luft:.4f} USDT (10% от рекомендуемого стопа)
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                    n = len(df_4h)
+                    start_idx = n - (n // 6) * 6
+                    chunked = df_4h.iloc[start_idx:]
 
-                st.markdown(
-                    f"""
-                    <div style="
-                        border: 2px solid #facc15;
-                        background-color: #fef9c3;
-                        padding: 10px 14px;
-                        border-radius: 8px;
-                        margin: 8px 0;
-                        color: #92400e;
-                        font-weight: 600;
-                    ">
-                        Рекомендуемый размер стопа: 10% ATR = {atr_10:.4f} USDT
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
+                    days = []
+                    for i in range(0, len(chunked), 6):
+                        block = chunked.iloc[i:i+6]
+                        if len(block) < 6:
+                            continue
+                        days.append({
+                            "open": block["open"].iloc[0],
+                            "high": block["high"].max(),
+                            "low": block["low"].min(),
+                            "close": block["close"].iloc[-1],
+                        })
 
-                st.success(f"Условно рекомендуемое плечо по волатильности: **x{rec_leverage}**")
+                    days = days[-5:]
+                    df_days = pd.DataFrame(days)
 
-                st.session_state["rec_stop_distance"] = float(atr_10)
-                st.caption("Расстояние стопа 10% ATR сохранено и используется как подсказка в поле SL.")
+                    if len(df_days) < 5:
+                        st.error("Недостаточно дневных баров для расчёта ATR(5).")
+                    else:
+                        df_days["prev_close"] = df_days["close"].shift(1)
+                        df_days["tr1"] = df_days["high"] - df_days["low"]
+                        df_days["tr2"] = (df_days["high"] - df_days["prev_close"]).abs()
+                        df_days["tr3"] = (df_days["low"] - df_days["prev_close"]).abs()
+                        df_days["tr"] = df_days[["tr1", "tr2", "tr3"]].max(axis=1)
+                        atr = df_days["tr"].rolling(window=5).mean().iloc[-1]
+
+                        if pd.isna(atr) or atr <= 0:
+                            st.error("Не удалось корректно посчитать ATR(5) по 5 дневным барам.")
+                        else:
+                            atr_10 = atr * 0.10
+                            max_luft = atr_10 * 0.10
+
+                            range_pct = (df_days["high"] - df_days["low"]) / df_days["close"] * 100
+                            avg_range = range_pct.mean()
+
+                            if avg_range < 1:
+                                rec_leverage = 25
+                            elif avg_range < 2:
+                                rec_leverage = 20
+                            elif avg_range < 3:
+                                rec_leverage = 15
+                            elif avg_range < 5:
+                                rec_leverage = 10
+                            else:
+                                rec_leverage = 5
+
+                            st.write(f"Найденный фьючерсный символ на BYDFi: **{matched_symbol}**")
+                            st.write(f"Текущая цена: **{last_price:.4f} USDT**")
+                            st.write(f"ATR(5): **{atr:.4f} USDT**")
+
+                            st.markdown(
+                                f"""
+                                <div style="
+                                    border: 2px solid #3b82f6;
+                                    background-color: #eff6ff;
+                                    padding: 10px 14px;
+                                    border-radius: 8px;
+                                    margin: 8px 0;
+                                    color: #1d4ed8;
+                                    font-weight: 600;
+                                ">
+                                    Максимальный люфт от уровня: {max_luft:.4f} USDT (10% от рекомендуемого стопа)
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                            st.markdown(
+                                f"""
+                                <div style="
+                                    border: 2px solid #facc15;
+                                    background-color: #fef9c3;
+                                    padding: 10px 14px;
+                                    border-radius: 8px;
+                                    margin: 8px 0;
+                                    color: #92400e;
+                                    font-weight: 600;
+                                ">
+                                    Рекомендуемый размер стопа: 10% ATR = {atr_10:.4f} USDT
+                                </div>
+                                """,
+                                unsafe_allow_html=True,
+                            )
+
+                            st.success(f"Условно рекомендуемое плечо по волатильности: **x{rec_leverage}**")
+
+                            st.session_state["rec_stop_distance"] = float(atr_10)
+                            st.caption("Расстояние стопа 10% ATR сохранено и используется как подсказка в поле SL.")
+
     except Exception as e:
         st.error(f"Ошибка при запросе к BYDFi: {e}")
 
@@ -256,7 +237,6 @@ with col_r1:
     balance = st.number_input("💰 Депозит, USDT", value=default_balance, min_value=0.0, step=100.0)
 
 with col_r2:
-    # убрали режим кнопок, оставляем только ручной ввод риска
     risk_percent = st.number_input(
         "⚠️ Риск на сделку, %",
         value=default_saved_risk,
@@ -293,7 +273,6 @@ with col_extra2:
         step=1,
     )
 
-# --- Entry как текст, чтобы не резать знаки ---
 with col_p1:
     entry_str = st.text_input(
         "📈 Цена входа (Entry)",
@@ -305,7 +284,6 @@ with col_p1:
     except ValueError:
         entry_price = 0.0
 
-# --- SL как текст, с учётом rec_stop_distance ---
 with col_p2:
     rec_stop_distance = st.session_state.get("rec_stop_distance", None)
 
@@ -330,7 +308,6 @@ with col_p2:
     except ValueError:
         stop_price = 0.0
 
-# --- TP как текст ---
 with col_p3:
     tp_str = st.text_input(
         "🎯 Тейк-профит (TP)",
@@ -340,21 +317,20 @@ with col_p3:
         tp_price = float(tp_str.replace(",", "."))
     except ValueError:
         tp_price = 0.0
-        
+
 # ---------- 4. Комиссия биржи ----------
 
 st.subheader("3️⃣ Комиссия биржи")
 
 commission_percent = st.number_input(
     "Комиссия биржи, %",
-    value=0.06,          # по умолчанию 0.06% за одну операцию
+    value=0.06,
     min_value=0.0,
     max_value=1.0,
     step=0.01,
     help="Комиссия за одну операцию (например, 0.05 = 0.05% за вход или выход).",
 )
 
-# перевели в долю, как раньше: 0.05% -> 0.0005
 commission_rate = commission_percent / 100.0
 
 # ---------- 5. Расчет ----------
@@ -394,7 +370,7 @@ if st.button("🚀 Рассчитать сделку"):
             rr = tp_distance / stop_distance
 
             fees = position_usd_no_lev * commission_rate * 2
-        
+
             profit_gross = tp_distance * qty
             loss_gross = stop_distance * qty
 
@@ -415,39 +391,39 @@ if st.button("🚀 Рассчитать сделку"):
                 verdict_color = "#b91c1c"
 
             col_out1, col_out2 = st.columns(2)
-            
+
             with col_out1:
                 st.markdown(
-        f"""
-        <div style="
-            border: 2px solid #0ea5e9;
-            background-color: #e0f2fe;
-            padding: 12px 16px;
-            border-radius: 10px;
-            margin: 8px 0;
-            color: #0369a1;
-            font-weight: 500;
-            line-height: 1.5;
-        ">
-            <div style="font-size: 15px; font-weight: 700; margin-bottom: 4px;">
-                📌 Итог по сделке
-            </div>
-            <div style="font-size: 13px; margin-bottom: 6px; color: {verdict_color};">
-                {verdict}
-            </div>
-            <span style="font-size: 13px; color: #0f172a;">
-                Риск на сделку: <b>{risk_amount:.2f} USDT</b><br>
-                Кол-во монет: <b>{qty:.4f}</b><br>
-                Объём позиции без плеча(маржа): <b>{position_usd_with_lev:.2f} USDT</b><br>
-                Объём позиции с плечом x{leverage}: <b>{position_usd_no_lev:.2f} USDT</b><br>
-            </span><br>
-            <span style="font-size: 13px; color: #0f172a;">
-                R:R (TP:SL): <b>{rr:.2f} : 1</b>
-            </span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+                    f"""
+                    <div style="
+                        border: 2px solid #0ea5e9;
+                        background-color: #e0f2fe;
+                        padding: 12px 16px;
+                        border-radius: 10px;
+                        margin: 8px 0;
+                        color: #0369a1;
+                        font-weight: 500;
+                        line-height: 1.5;
+                    ">
+                        <div style="font-size: 15px; font-weight: 700; margin-bottom: 4px;">
+                            📌 Итог по сделке
+                        </div>
+                        <div style="font-size: 13px; margin-bottom: 6px; color: {verdict_color};">
+                            {verdict}
+                        </div>
+                        <span style="font-size: 13px; color: #0f172a;">
+                            Риск на сделку: <b>{risk_amount:.2f} USDT</b><br>
+                            Кол-во монет: <b>{qty:.4f}</b><br>
+                            Объём позиции без плеча(маржа): <b>{position_usd_with_lev:.2f} USDT</b><br>
+                            Объём позиции с плечом x{leverage}: <b>{position_usd_no_lev:.2f} USDT</b><br>
+                        </span><br>
+                        <span style="font-size: 13px; color: #0f172a;">
+                            R:R (TP:SL): <b>{rr:.2f} : 1</b>
+                        </span>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
 
             with col_out2:
                 st.markdown(
@@ -485,6 +461,8 @@ if st.button("🚀 Рассчитать сделку"):
                 "side": side,
             }
             save_settings(new_settings)
+            # обновляем сессию без перечитывания файла
+            st.session_state["settings"] = new_settings
             st.caption("Настройки депозита, риска, плеча и комиссии сохранены.")
 
 # ---------- футер ----------
