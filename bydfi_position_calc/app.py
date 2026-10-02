@@ -285,7 +285,7 @@ with col_r2:
     risk_percent = st.number_input(
         "⚠️ Риск на сделку, %",
         value=default_saved_risk,
-        min_value=0.01,
+        min_value=0.0001,
         max_value=10.0,
         step=0.01
     )
