@@ -69,7 +69,7 @@ def show_errors(load_errors):
         with st.expander("Подробности ошибки (для отладки)"):
             for ex_id, tb in load_errors:
                 st.markdown(f"**{ex_id.upper()}**")
-                st.code(tb)
+                st.text(tb)
 
 
 # ---------- сохранение настроек ----------
@@ -82,7 +82,7 @@ def load_settings() -> dict:
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
+        render_analysis
             return {}
     return {}
 
@@ -150,7 +150,7 @@ def render_analysis(user_raw: str):
             f"Ошибка: {e}"
         )
         with st.expander("Подробности ошибки (для отладки)"):
-            st.code(traceback.format_exc())
+            st.text(traceback.format_exc())
         return
 
     if not ohlcv or len(ohlcv) < 30:
