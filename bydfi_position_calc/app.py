@@ -16,18 +16,22 @@ EXCHANGE_CHAIN = [PRIMARY_EXCHANGE] + FALLBACK_EXCHANGES
 
 # ---------- кешируем тяжелые операции ----------
 
-@st.cache_resource(show_spinner=False)
-def get_exchange(exchange_id: str):
-    """Один объект биржи с уже загруженными рынками на всё приложение.
-    Рынки грузятся один раз, а не при каждом запросе цены или свечей."""
-    ex = getattr(ccxt, exchange_id)({"enableRateLimit": True, "timeout": 10000})
-    ex.load_markets()
-    return ex
+@st.cache_resource(ttl=600, show_spinner=False)
+def connect_exchange(exchange_id: str):
+    """Возвращает (биржа, текст_ошибки). Рынки грузятся один раз на всё приложение.
+    Кэшируется и успех, и неудача на 10 минут: недоступная биржа не будет
+    тормозить каждое нажатие повторными запросами."""
+    try:
+        ex = getattr(ccxt, exchange_id)({"enableRateLimit": True, "timeout": 10000})
+        ex.load_markets()
+        return ex, None
+    except Exception:
+        return None, traceback.format_exc()
 
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_price_and_ohlcv(exchange_id: str, symbol: str):
-    ex = get_exchange(exchange_id)
+    ex = connect_exchange(exchange_id)[0]
     ticker = ex.fetch_ticker(symbol)
     last = ticker.get("last") or ticker.get("close")
     ohlcv = ex.fetch_ohlcv(symbol, timeframe="4h", limit=30)
@@ -64,14 +68,6 @@ def find_symbol(markets: dict, user_raw: str):
     return None
 
 
-def show_errors(load_errors):
-    if load_errors:
-        with st.expander("Подробности ошибки (для отладки)"):
-            for ex_id, tb in load_errors:
-                st.markdown(f"**{ex_id.upper()}**")
-                st.text(tb)
-
-
 # ---------- сохранение настроек ----------
 
 SETTINGS_FILE = "settings.json"
@@ -82,7 +78,7 @@ def load_settings() -> dict:
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        render_analysis
+        except Exception:
             return {}
     return {}
 
@@ -109,30 +105,21 @@ settings = st.session_state["settings"]
 
 def render_analysis(user_raw: str):
     # 1. подключаемся к бирже (основная, затем запасные)
-    load_errors = []
     exchange_id, markets = None, None
     for ex_id in EXCHANGE_CHAIN:
-        try:
-            with st.spinner(f"Загружаем рынки {ex_id.upper()}..."):
-                markets = get_exchange(ex_id).markets
+        with st.spinner(f"Загружаем рынки {ex_id.upper()}..."):
+            ex, _ = connect_exchange(ex_id)
+        if ex is not None:
+            markets = ex.markets
             exchange_id = ex_id
             break
-        except Exception:
-            load_errors.append((ex_id, traceback.format_exc()))
 
     if exchange_id is None:
-        st.error("Не удалось подключиться ни к одной бирже. Подробности ниже.")
-        show_errors(load_errors)
+        st.error("Не удалось получить данные с биржи. Попробуй позже.")
         return
 
-    if exchange_id != PRIMARY_EXCHANGE:
-        st.warning(
-            f"⚠️ {PRIMARY_EXCHANGE.upper()} сейчас недоступна, данные взяты с "
-            f"{exchange_id.upper()}. Цена и ATR могут слегка отличаться от BYDFi."
-        )
-        show_errors(load_errors)
-
     ex_name = exchange_id.upper()
+    st.caption(f"Источник данных: {ex_name}")
 
     # 2. ищем фьючерсный символ
     matched_symbol = find_symbol(markets, user_raw)
@@ -149,8 +136,6 @@ def render_analysis(user_raw: str):
             f"Не удалось получить данные по {matched_symbol} на {ex_name}.\n\n"
             f"Ошибка: {e}"
         )
-        with st.expander("Подробности ошибки (для отладки)"):
-            st.text(traceback.format_exc())
         return
 
     if not ohlcv or len(ohlcv) < 30:
@@ -164,8 +149,6 @@ def render_analysis(user_raw: str):
         ohlcv,
         columns=["time", "open", "high", "low", "close", "volume"]
     )
-
-    st.caption(f"DEBUG: получено {len(df_4h)} 4h свечей (ожидаем 30)")
 
     n = len(df_4h)
     start_idx = n - (n // 6) * 6
@@ -285,8 +268,6 @@ if show_analysis:
         render_analysis(user_raw)
     except Exception as e:
         st.error(f"Ошибка при расчёте аналитики: {e}")
-        with st.expander("Подробности ошибки (для отладки)"):
-            st.code(traceback.format_exc())
 
 # ---------- 2. Риск и депозит ----------
 
