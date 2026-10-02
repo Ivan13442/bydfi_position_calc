@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import traceback
 
@@ -36,6 +37,16 @@ def get_price_and_ohlcv(exchange_id: str, symbol: str):
     last = ticker.get("last") or ticker.get("close")
     ohlcv = ex.fetch_ohlcv(symbol, timeframe="4h", limit=30)
     return last, ohlcv
+
+
+def fmt_num(x, min_dec=2, sig=5, max_dec=10):
+    """Число с адаптивным количеством знаков: чем меньше цена, тем больше знаков после запятой.
+    Показывает минимум sig значащих цифр (но не меньше min_dec знаков после запятой)."""
+    if x is None or not math.isfinite(x) or x == 0:
+        return f"{x}"
+    dec = sig - 1 - math.floor(math.log10(abs(x)))
+    dec = max(min_dec, min(max_dec, dec))
+    return f"{x:.{dec}f}"
 
 
 def find_symbol(markets: dict, user_raw: str):
@@ -202,8 +213,8 @@ def render_analysis(user_raw: str):
         rec_leverage = 5
 
     st.write(f"Найденный фьючерсный символ на {ex_name}: **{matched_symbol}**")
-    st.write(f"Текущая цена: **{last_price:.4f} USDT**")
-    st.write(f"ATR(5): **{atr:.4f} USDT**")
+    st.write(f"Текущая цена: **{fmt_num(last_price)} USDT**")
+    st.write(f"ATR(5): **{fmt_num(atr)} USDT**")
 
     st.markdown(
         f"""
@@ -216,7 +227,7 @@ def render_analysis(user_raw: str):
             color: #1d4ed8;
             font-weight: 600;
         ">
-            Максимальный люфт от уровня: {max_luft:.4f} USDT (10% от рекомендуемого стопа)
+            Максимальный люфт от уровня: {fmt_num(max_luft)} USDT (10% от рекомендуемого стопа)
         </div>
         """,
         unsafe_allow_html=True,
@@ -233,7 +244,7 @@ def render_analysis(user_raw: str):
             color: #92400e;
             font-weight: 600;
         ">
-            Рекомендуемый размер стопа: 10% ATR = {atr_10:.4f} USDT
+            Рекомендуемый размер стопа: 10% ATR = {fmt_num(atr_10)} USDT
         </div>
         """,
         unsafe_allow_html=True,
@@ -242,6 +253,16 @@ def render_analysis(user_raw: str):
     st.success(f"Условно рекомендуемое плечо по волатильности: **x{rec_leverage}**")
 
     st.session_state["rec_stop_distance"] = float(atr_10)
+
+    # Entry по умолчанию = текущая цена актива. Фиксируем один раз на тикер,
+    # чтобы введённое вручную значение не сбрасывалось при обновлении цены.
+    if st.session_state.get("entry_default_symbol") != matched_symbol:
+        st.session_state["entry_default"] = float(last_price)
+        st.session_state["entry_default_symbol"] = matched_symbol
+        st.session_state["entry_ver"] = st.session_state.get("entry_ver", 0) + 1
+    if st.button("📥 Подставить текущую цену в Entry"):
+        st.session_state["entry_default"] = float(last_price)
+        st.session_state["entry_ver"] = st.session_state.get("entry_ver", 0) + 1
     st.caption("Расстояние стопа 10% ATR сохранено и используется как подсказка в поле SL.")
 
 
@@ -285,7 +306,7 @@ with col_r2:
     risk_percent = st.number_input(
         "⚠️ Риск на сделку, %",
         value=default_saved_risk,
-        min_value=0.0001,
+        min_value=0.01,
         max_value=10.0,
         step=0.01
     )
@@ -297,8 +318,6 @@ st.write(f"Текущий риск: **{risk_percent:.2f}%** от депозит�
 st.subheader("2️⃣ Параметры входа")
 
 default_entry = 100.0
-default_sl = 95.0
-default_tp = 110.0
 
 col_p1, col_p2, col_p3 = st.columns(3)
 col_extra1, col_extra2 = st.columns(2)
@@ -319,9 +338,11 @@ with col_extra2:
     )
 
 with col_p1:
+    entry_initial = st.session_state.get("entry_default", default_entry)
     entry_str = st.text_input(
         "📈 Цена входа (Entry)",
-        value=str(default_entry),
+        value=fmt_num(entry_initial),
+        key=f"entry_input_{st.session_state.get('entry_ver', 0)}",
         help="Можно вводить любое количество знаков после запятой.",
     )
     try:
@@ -329,24 +350,27 @@ with col_p1:
     except ValueError:
         entry_price = 0.0
 
+# Рекомендованные SL и TP подстраиваются под цену входа и направление сделки.
+rec_stop_distance = st.session_state.get("rec_stop_distance", None)
+sign = 1 if side == "Лонг" else -1
+base_price = entry_price if entry_price > 0 else default_entry
+
+use_atr = bool(rec_stop_distance) and entry_price > 0
+price_mismatch = False
+if use_atr:
+    suggested_sl = entry_price - sign * rec_stop_distance
+    suggested_tp = entry_price + sign * 2 * rec_stop_distance  # R:R = 2:1
+    price_mismatch = suggested_sl <= 0 or suggested_tp <= 0
+if not use_atr or price_mismatch:
+    # без ATR (или если цена входа не подходит активу): SL на 5%, TP на 10% от входа
+    suggested_sl = base_price * (1 - sign * 0.05)
+    suggested_tp = base_price * (1 + sign * 0.10)
+
 with col_p2:
-    rec_stop_distance = st.session_state.get("rec_stop_distance", None)
-
-    if rec_stop_distance and entry_price > 0:
-        if side == "Лонг":
-            suggested_sl = entry_price - rec_stop_distance
-        else:
-            suggested_sl = entry_price + rec_stop_distance
-    else:
-        suggested_sl = default_sl
-
-    if suggested_sl <= 0:
-        suggested_sl = 0.00000001
-
     stop_str = st.text_input(
         "🛑 Стоп-лосс (SL)",
-        value=f"{suggested_sl}",
-        help="Если ниже считали ATR, сюда подставлен стоп по 10% ATR, можно скорректировать.",
+        value=fmt_num(suggested_sl),
+        help="Если выше считали ATR, сюда подставлен стоп по 10% ATR от цены входа, можно скорректировать.",
     )
     try:
         stop_price = float(stop_str.replace(",", "."))
@@ -356,12 +380,19 @@ with col_p2:
 with col_p3:
     tp_str = st.text_input(
         "🎯 Тейк-профит (TP)",
-        value=str(default_tp),
+        value=fmt_num(suggested_tp),
+        help="По умолчанию R:R = 2:1 от рекомендованного стопа, можно скорректировать.",
     )
     try:
         tp_price = float(tp_str.replace(",", "."))
     except ValueError:
         tp_price = 0.0
+
+if price_mismatch:
+    st.warning(
+        "Цена входа сильно отличается от цены актива: стоп 10% ATR не помещается. "
+        "Нажми «Подставить текущую цену в Entry» или введи актуальную цену."
+    )
 
 # ---------- 4. Комиссия биржи ----------
 
@@ -458,7 +489,7 @@ if st.button("🚀 Рассчитать сделку"):
                         </div>
                         <span style="font-size: 13px; color: #0f172a;">
                             Риск на сделку: <b>{risk_amount:.2f} USDT</b><br>
-                            Кол-во монет: <b>{qty:.4f}</b><br>
+                            Кол-во монет: <b>{fmt_num(qty, sig=4)}</b><br>
                             Объём позиции без плеча(маржа): <b>{position_usd_with_lev:.2f} USDT</b><br>
                             Объём позиции с плечом x{leverage}: <b>{position_usd_no_lev:.2f} USDT</b><br>
                         </span><br>
