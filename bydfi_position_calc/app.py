@@ -51,7 +51,7 @@ st.markdown("Заполни параметры сделки, выбери рис
 # ---------- 1. Аналитика фьючерса: ATR и стоп 10% ATR ----------
 
 st.markdown("---")
-st.subheader("📊 Аналитика фьючерса и рекомендуемый стоп 10% ATR")
+st.subheader("📊 Аналитика фьючерса и рекомендуемый стоп 10%ATR")
 
 fut_symbol_input = st.text_input("Фьючерсный тикер (например BTCUSDT, ETHUSDT)", value="BTCUSDT")
 
