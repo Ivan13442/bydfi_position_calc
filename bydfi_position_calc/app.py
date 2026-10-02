@@ -1,52 +1,271 @@
-import streamlit as st
-import pandas as pd
-import ccxt
 import json
 import os
+import traceback
+
+import ccxt
+import pandas as pd
+import streamlit as st
+
+# ---------- биржи: основная и запасные ----------
+# Если BYDFi не отвечает (например, 404), данные берутся с запасной биржи.
+# Чтобы отключить запасные биржи: FALLBACK_EXCHANGES = []
+PRIMARY_EXCHANGE = "bydfi"
+FALLBACK_EXCHANGES = ["okx", "bitget"]
+EXCHANGE_CHAIN = [PRIMARY_EXCHANGE] + FALLBACK_EXCHANGES
+
+
+# ---------- кешируем тяжелые операции ----------
+
+@st.cache_resource(show_spinner=False)
+def get_exchange(exchange_id: str):
+    """Один объект биржи с уже загруженными рынками на всё приложение.
+    Рынки грузятся один раз, а не при каждом запросе цены или свечей."""
+    ex = getattr(ccxt, exchange_id)({"enableRateLimit": True, "timeout": 10000})
+    ex.load_markets()
+    return ex
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_price_and_ohlcv(exchange_id: str, symbol: str):
+    ex = get_exchange(exchange_id)
+    ticker = ex.fetch_ticker(symbol)
+    last = ticker.get("last") or ticker.get("close")
+    ohlcv = ex.fetch_ohlcv(symbol, timeframe="4h", limit=30)
+    return last, ohlcv
+
+
+def find_symbol(markets: dict, user_raw: str):
+    """BTCUSDT -> символ рынка. Фьючерсам (swap) отдаём приоритет перед спотом."""
+    direct_map = {
+        "BTCUSDT": "BTC/USDT:USDT",
+        "ETHUSDT": "ETH/USDT:USDT",
+    }
+    mapped = direct_map.get(user_raw)
+    if mapped in markets:
+        return mapped
+
+    swap_match, other_match = None, None
+    for sym, m in markets.items():
+        compact = f"{m.get('base', '')}{m.get('quote', '')}".upper()
+        if compact != user_raw:
+            continue
+        if m.get("swap"):
+            swap_match = swap_match or sym
+        else:
+            other_match = other_match or sym
+    if swap_match:
+        return swap_match
+    if other_match:
+        return other_match
+
+    for sym in markets:
+        if sym.replace("-", "").replace("/", "").replace(":", "").upper() == user_raw:
+            return sym
+    return None
+
+
+def show_errors(load_errors):
+    if load_errors:
+        with st.expander("Подробности ошибки (для отладки)"):
+            for ex_id, tb in load_errors:
+                st.markdown(f"**{ex_id.upper()}**")
+                st.code(tb)
+
 
 # ---------- сохранение настроек ----------
 
 SETTINGS_FILE = "settings.json"
 
-def load_settings():
+
+def load_settings() -> dict:
     if os.path.exists(SETTINGS_FILE):
         try:
             with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except:
+        except Exception:
             return {}
     return {}
+
 
 def save_settings(data: dict):
     try:
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
-    except:
+    except Exception:
         pass
 
-settings = load_settings()
 
-# ---------- КЭШИРУЕМ ЗАПРОСЫ К BYDFi ----------
+# ---------- загрузка настроек один раз за сессию ----------
 
-@st.cache_data(ttl=60)
-def get_markets():
-    exchange = ccxt.bydfi({"enableRateLimit": True})
-    return exchange.load_markets()
+# Читаем настройки один раз при старте сессии, не при каждом ререндере.
+# После save_settings() обновляем st.session_state вручную — файл не перечитываем.
+if "settings" not in st.session_state:
+    st.session_state["settings"] = load_settings()
 
-@st.cache_data(ttl=10)
-def get_ticker(symbol: str):
-    exchange = ccxt.bydfi({"enableRateLimit": True})
-    return exchange.fetch_ticker(symbol)
+settings = st.session_state["settings"]
 
-@st.cache_data(ttl=60)
-def get_ohlcv(symbol: str, timeframe: str = "4h", limit: int = 30):
-    exchange = ccxt.bydfi({"enableRateLimit": True})
-    return exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+
+# ---------- аналитика: ATR и стоп 10% ATR ----------
+
+def render_analysis(user_raw: str):
+    # 1. подключаемся к бирже (основная, затем запасные)
+    load_errors = []
+    exchange_id, markets = None, None
+    for ex_id in EXCHANGE_CHAIN:
+        try:
+            with st.spinner(f"Загружаем рынки {ex_id.upper()}..."):
+                markets = get_exchange(ex_id).markets
+            exchange_id = ex_id
+            break
+        except Exception:
+            load_errors.append((ex_id, traceback.format_exc()))
+
+    if exchange_id is None:
+        st.error("Не удалось подключиться ни к одной бирже. Подробности ниже.")
+        show_errors(load_errors)
+        return
+
+    if exchange_id != PRIMARY_EXCHANGE:
+        st.warning(
+            f"⚠️ {PRIMARY_EXCHANGE.upper()} сейчас недоступна, данные взяты с "
+            f"{exchange_id.upper()}. Цена и ATR могут слегка отличаться от BYDFi."
+        )
+        show_errors(load_errors)
+
+    ex_name = exchange_id.upper()
+
+    # 2. ищем фьючерсный символ
+    matched_symbol = find_symbol(markets, user_raw)
+    if matched_symbol is None:
+        st.error(f"Фьючерсный тикер не найден на {ex_name}: **{user_raw}**.")
+        return
+
+    # 3. цена и свечи
+    try:
+        with st.spinner(f"Получаем данные по {matched_symbol}..."):
+            last_price, ohlcv = get_price_and_ohlcv(exchange_id, matched_symbol)
+    except Exception as e:
+        st.error(
+            f"Не удалось получить данные по {matched_symbol} на {ex_name}.\n\n"
+            f"Ошибка: {e}"
+        )
+        with st.expander("Подробности ошибки (для отладки)"):
+            st.code(traceback.format_exc())
+        return
+
+    if not ohlcv or len(ohlcv) < 30:
+        st.error("Недостаточно 4h свечей для расчёта дневного ATR (нужно 30).")
+        return
+
+    if last_price is None:
+        last_price = float(ohlcv[-1][4])
+
+    df_4h = pd.DataFrame(
+        ohlcv,
+        columns=["time", "open", "high", "low", "close", "volume"]
+    )
+
+    st.caption(f"DEBUG: получено {len(df_4h)} 4h свечей (ожидаем 30)")
+
+    n = len(df_4h)
+    start_idx = n - (n // 6) * 6
+    chunked = df_4h.iloc[start_idx:]
+
+    days = []
+    for i in range(0, len(chunked), 6):
+        block = chunked.iloc[i:i + 6]
+        if len(block) < 6:
+            continue
+        days.append({
+            "open": block["open"].iloc[0],
+            "high": block["high"].max(),
+            "low": block["low"].min(),
+            "close": block["close"].iloc[-1],
+        })
+
+    days = days[-5:]
+    df_days = pd.DataFrame(days)
+
+    if len(df_days) < 5:
+        st.error("Недостаточно дневных баров для расчёта ATR(5).")
+        return
+
+    df_days["prev_close"] = df_days["close"].shift(1)
+    df_days["tr1"] = df_days["high"] - df_days["low"]
+    df_days["tr2"] = (df_days["high"] - df_days["prev_close"]).abs()
+    df_days["tr3"] = (df_days["low"] - df_days["prev_close"]).abs()
+    df_days["tr"] = df_days[["tr1", "tr2", "tr3"]].max(axis=1)
+    atr = df_days["tr"].rolling(window=5).mean().iloc[-1]
+
+    if pd.isna(atr) or atr <= 0:
+        st.error("Не удалось корректно посчитать ATR(5) по 5 дневным барам.")
+        return
+
+    atr_10 = atr * 0.10
+    max_luft = atr_10 * 0.10
+
+    range_pct = (df_days["high"] - df_days["low"]) / df_days["close"] * 100
+    avg_range = range_pct.mean()
+
+    if avg_range < 1:
+        rec_leverage = 25
+    elif avg_range < 2:
+        rec_leverage = 20
+    elif avg_range < 3:
+        rec_leverage = 15
+    elif avg_range < 5:
+        rec_leverage = 10
+    else:
+        rec_leverage = 5
+
+    st.write(f"Найденный фьючерсный символ на {ex_name}: **{matched_symbol}**")
+    st.write(f"Текущая цена: **{last_price:.4f} USDT**")
+    st.write(f"ATR(5): **{atr:.4f} USDT**")
+
+    st.markdown(
+        f"""
+        <div style="
+            border: 2px solid #3b82f6;
+            background-color: #eff6ff;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin: 8px 0;
+            color: #1d4ed8;
+            font-weight: 600;
+        ">
+            Максимальный люфт от уровня: {max_luft:.4f} USDT (10% от рекомендуемого стопа)
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        f"""
+        <div style="
+            border: 2px solid #facc15;
+            background-color: #fef9c3;
+            padding: 10px 14px;
+            border-radius: 8px;
+            margin: 8px 0;
+            color: #92400e;
+            font-weight: 600;
+        ">
+            Рекомендуемый размер стопа: 10% ATR = {atr_10:.4f} USDT
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.success(f"Условно рекомендуемое плечо по волатильности: **x{rec_leverage}**")
+
+    st.session_state["rec_stop_distance"] = float(atr_10)
+    st.caption("Расстояние стопа 10% ATR сохранено и используется как подсказка в поле SL.")
+
 
 # ---------- заголовок ----------
 
 st.title("🧮 Калькулятор объема позиции")
-st.markdown("Заполни параметры сделки, выбери риск и плечо — я посчитаю объем, количество монет и R:R.")
+st.markdown("Заполни параметры сделки, выбери риск и плечо - я посчитаю объем, количество монет и R:R.")
 
 # ---------- 1. Аналитика фьючерса: ATR и стоп 10% ATR ----------
 
@@ -58,130 +277,16 @@ fut_symbol_input = st.text_input("Фьючерсный тикер (наприм�
 if "rec_stop_distance" not in st.session_state:
     st.session_state["rec_stop_distance"] = None
 
-run_analysis = st.button("🔍 Посчитать ATR и стоп 10% ATR")
+show_analysis = st.checkbox("Показать аналитику фьючерса и стоп 10% ATR", value=False)
 
-if run_analysis:
+if show_analysis:
+    user_raw = fut_symbol_input.upper().replace("PERP", "").strip()
     try:
-        # загружаем рынки (кэшируется)
-        markets = get_markets()
-
-        # приводим пользовательский ввод к формату BASE+QUOTE (BTCUSDT, ETHUSDT и т.п.)
-        user_raw = fut_symbol_input.upper().replace("PERP", "").strip()
-
-        # быстрый маппинг популярных тикеров на BYDFi-формат
-        direct_map = {
-            "BTCUSDT": "BTC/USDT:USDT",
-            "ETHUSDT": "ETH/USDT:USDT",
-        }
-
-        if user_raw in direct_map:
-            matched_symbol = direct_map[user_raw]
-        else:
-            matched_symbol = None
-
-            # если не нашли в direct_map — пробуем искать по markets
-            for m_symbol, m_info in markets.items():
-                base = m_info.get("base", "")
-                quote = m_info.get("quote", "")
-                compact = f"{base}{quote}".upper()
-                if compact == user_raw:
-                    matched_symbol = m_symbol
-                    break
-
-            # если по compact не нашли, пробуем прямым совпадением по ключу
-            if matched_symbol is None:
-                for m_symbol in markets.keys():
-                    if m_symbol.replace("-", "").replace("/", "").replace(":", "").upper() == user_raw:
-                        matched_symbol = m_symbol
-                        break
-
-        if matched_symbol is None:
-            st.error(f"Фьючерсный тикер не найден на BYDFi: **{user_raw}**.")
-        else:
-            # текущая цена (кэшируется)
-            ticker = get_ticker(matched_symbol)
-            last_price = ticker["last"]
-
-            # --- НОВАЯ ЛОГИКА ВЫБОРА СВЕЧЕЙ ДЛЯ ATR (кэшируется) ---
-            used_timeframe = "4h"
-            ohlcv = get_ohlcv(matched_symbol, timeframe=used_timeframe, limit=30)
-
-            if not ohlcv:
-                st.error("Не удалось получить данные OHLCV для расчёта ATR.")
-            else:
-                df_ohlc = pd.DataFrame(ohlcv, columns=["time", "open", "high", "low", "close", "volume"])
-
-                df_ohlc["prev_close"] = df_ohlc["close"].shift(1)
-                df_ohlc["tr1"] = df_ohlc["high"] - df_ohlc["low"]
-                df_ohlc["tr2"] = (df_ohlc["high"] - df_ohlc["prev_close"]).abs()
-                df_ohlc["tr3"] = (df_ohlc["low"] - df_ohlc["prev_close"]).abs()
-                df_ohlc["tr"] = df_ohlc[["tr1", "tr2", "tr3"]].max(axis=1)
-                atr = df_ohlc["tr"].rolling(window=14).mean().iloc[-1]
-
-                if pd.isna(atr) or atr <= 0:
-                    st.error("Не удалось корректно посчитать ATR по этому фьючерсу.")
-                else:
-                    atr_10 = atr * 0.10           # 10% ATR
-                    max_luft = atr_10 * 0.10      # 10% от рекомендуемого стопа = 1% ATR
-
-                    range_pct = (df_ohlc["high"] - df_ohlc["low"]) / df_ohlc["close"] * 100
-                    avg_range = range_pct.mean()
-
-                    if avg_range < 1:
-                        rec_leverage = 25
-                    elif avg_range < 2:
-                        rec_leverage = 20
-                    elif avg_range < 3:
-                        rec_leverage = 15
-                    elif avg_range < 5:
-                        rec_leverage = 10
-                    else:
-                        rec_leverage = 5
-
-                    st.write(f"Найденный фьючерсный символ на BYDFi: **{matched_symbol}**")
-                    st.write(f"Текущая цена: **{last_price:.4f} USDT**")
-                    st.write(f"ATR(14, {used_timeframe}, по 30×4h свечам): **{atr:.4f} USDT**")
-
-                    st.markdown(
-                        f"""
-                        <div style="
-                            border: 2px solid #3b82f6;
-                            background-color: #eff6ff;
-                            padding: 10px 14px;
-                            border-radius: 8px;
-                            margin: 8px 0;
-                            color: #1d4ed8;
-                            font-weight: 600;
-                        ">
-                            Максимальный люфт от уровня: {max_luft:.4f} USDT (10% от рекомендуемого стопа)
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                    st.markdown(
-                        f"""
-                        <div style="
-                            border: 2px solid #facc15;
-                            background-color: #fef9c3;
-                            padding: 10px 14px;
-                            border-radius: 8px;
-                            margin: 8px 0;
-                            color: #92400e;
-                            font-weight: 600;
-                        ">
-                            Рекомендуемый размер стопа: 10% ATR = {atr_10:.4f} USDT
-                        </div>
-                        """,
-                        unsafe_allow_html=True,
-                    )
-
-                    st.success(f"Условно рекомендуемое плечо по волатильности: **x{rec_leverage}**")
-
-                    st.session_state["rec_stop_distance"] = float(atr_10)
-                    st.caption("Расстояние стопа 10% ATR сохранено и используется как подсказка в поле SL.")
+        render_analysis(user_raw)
     except Exception as e:
-        st.error(f"Ошибка при запросе к BYDFi: {e}")
+        st.error(f"Ошибка при расчёте аналитики: {e}")
+        with st.expander("Подробности ошибки (для отладки)"):
+            st.code(traceback.format_exc())
 
 # ---------- 2. Риск и депозит ----------
 
@@ -222,11 +327,26 @@ default_leverage = int(settings.get("leverage", 10))
 
 with col_extra1:
     side = st.radio("Направление сделки", ["Лонг", "Шорт"], index=0 if default_side == "Лонг" else 1)
+
 with col_extra2:
-    leverage = st.number_input("🔧 Плечо (leverage)", value=default_leverage, min_value=1, max_value=200, step=1)
+    leverage = st.number_input(
+        "🔧 Плечо (leverage)",
+        value=default_leverage,
+        min_value=1,
+        max_value=200,
+        step=1,
+    )
 
 with col_p1:
-    entry_price = st.number_input("📈 Цена входа (Entry)", value=default_entry, min_value=0.0001)
+    entry_str = st.text_input(
+        "📈 Цена входа (Entry)",
+        value=str(default_entry),
+        help="Можно вводить любое количество знаков после запятой.",
+    )
+    try:
+        entry_price = float(entry_str.replace(",", "."))
+    except ValueError:
+        entry_price = 0.0
 
 with col_p2:
     rec_stop_distance = st.session_state.get("rec_stop_distance", None)
@@ -240,24 +360,42 @@ with col_p2:
         suggested_sl = default_sl
 
     if suggested_sl <= 0:
-        suggested_sl = 0.0001
+        suggested_sl = 0.00000001
 
-    stop_price = st.number_input(
+    stop_str = st.text_input(
         "🛑 Стоп-лосс (SL)",
-        value=float(suggested_sl),
-        min_value=0.0001,
-        help="Если ниже считали ATR, сюда подставлен стоп по 10% ATR, можно скорректировать."
+        value=f"{suggested_sl}",
+        help="Если ниже считали ATR, сюда подставлен стоп по 10% ATR, можно скорректировать.",
     )
+    try:
+        stop_price = float(stop_str.replace(",", "."))
+    except ValueError:
+        stop_price = 0.0
 
 with col_p3:
-    tp_price = st.number_input("🎯 Тейк-профит (TP)", value=default_tp, min_value=0.0001)
+    tp_str = st.text_input(
+        "🎯 Тейк-профит (TP)",
+        value=str(default_tp),
+    )
+    try:
+        tp_price = float(tp_str.replace(",", "."))
+    except ValueError:
+        tp_price = 0.0
 
-# ---------- 4. Комиссии ----------
+# ---------- 4. Комиссия биржи ----------
 
-st.subheader("3️⃣ Комиссии (можно оставить по умолчанию)")
-default_fee = float(settings.get("taker_fee", 0.06))
-taker_fee = st.number_input("Комиссия (taker), % за сделку", value=default_fee, min_value=0.0, max_value=1.0, step=0.01)
-taker_fee /= 100.0
+st.subheader("3️⃣ Комиссия биржи")
+
+commission_percent = st.number_input(
+    "Комиссия биржи, %",
+    value=0.06,
+    min_value=0.0,
+    max_value=1.0,
+    step=0.01,
+    help="Комиссия за одну операцию (например, 0.05 = 0.05% за вход или выход).",
+)
+
+commission_rate = commission_percent / 100.0
 
 # ---------- 5. Расчет ----------
 
@@ -292,10 +430,10 @@ if st.button("🚀 Рассчитать сделку"):
         else:
             qty = risk_amount / stop_distance
             position_usd_no_lev = qty * entry_price
-            position_usd_with_lev = position_usd_no_lev * leverage
+            position_usd_with_lev = position_usd_no_lev / leverage
             rr = tp_distance / stop_distance
 
-            fees = position_usd_with_lev * taker_fee * 2
+            fees = position_usd_no_lev * commission_rate * 2
 
             profit_gross = tp_distance * qty
             loss_gross = stop_distance * qty
@@ -340,8 +478,10 @@ if st.button("🚀 Рассчитать сделку"):
                         <span style="font-size: 13px; color: #0f172a;">
                             Риск на сделку: <b>{risk_amount:.2f} USDT</b><br>
                             Кол-во монет: <b>{qty:.4f}</b><br>
-                            Объём позиции без плеча: <b>{position_usd_no_lev:.2f} USDT</b><br>
-                            Объём позиции c плечом x{leverage}: <b>{position_usd_with_lev:.2f} USDT</b><br>
+                            Объём позиции без плеча(маржа): <b>{position_usd_with_lev:.2f} USDT</b><br>
+                            Объём позиции с плечом x{leverage}: <b>{position_usd_no_lev:.2f} USDT</b><br>
+                        </span><br>
+                        <span style="font-size: 13px; color: #0f172a;">
                             R:R (TP:SL): <b>{rr:.2f} : 1</b>
                         </span>
                     </div>
@@ -381,10 +521,12 @@ if st.button("🚀 Рассчитать сделку"):
                 "balance": balance,
                 "risk_percent": risk_percent,
                 "leverage": leverage,
-                "taker_fee": taker_fee * 100,
+                "commission": commission_rate * 100,
                 "side": side,
             }
             save_settings(new_settings)
+            # обновляем сессию без перечитывания файла
+            st.session_state["settings"] = new_settings
             st.caption("Настройки депозита, риска, плеча и комиссии сохранены.")
 
 # ---------- футер ----------
@@ -398,7 +540,10 @@ st.markdown(
         font-size: 12px;
         color: #9ca3af;
     ">
-        Разработка: Ivan Averyanov
+        Разработка: 
+        <a href="https://t.me/averyanoviv" target="_blank" style="color: #60a5fa; text-decoration: none;">
+            @averyanoviv
+        </a>
     </div>
     """,
     unsafe_allow_html=True,
